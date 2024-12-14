@@ -4,17 +4,24 @@ import json
 import logging
 from typing import List
 
-from flask import (
-    Flask, 
-    render_template, 
-    request, 
-    redirect, 
-    url_for, 
-    flash, 
-    session, 
-    send_file, 
-    current_app
-)
+# Asegúrate de que Flask está instalado
+try:
+    from flask import (
+        Flask, 
+        render_template, 
+        request, 
+        redirect, 
+        url_for, 
+        flash, 
+        session, 
+        send_file, 
+        current_app
+    )
+    print("Flask instalado correctamente.")
+except ImportError as e:
+    print("Flask no está instalado. Instalando Flask...")
+    os.system('pip install Flask')
+
 from werkzeug.utils import secure_filename
 from werkzeug.exceptions import RequestEntityTooLarge
 
@@ -303,7 +310,7 @@ def view_photo(filename: str):
 
 @app.errorhandler(RequestEntityTooLarge)
 def handle_large_file(error):
-    """Handle file size exceeding limit."""
+    """Handle file size exceeding limit.""" 
     flash(f'Tamaño de archivo excedido. Máximo {PhotoUploadConfig.MAX_FILE_SIZE//(1024*1024)} MB', 'error')
     return redirect(url_for('index'))
 
