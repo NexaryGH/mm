@@ -3,33 +3,20 @@ import uuid
 import json
 import logging
 from typing import List
-
-# Asegúrate de que Flask está instalado
-try:
-    from flask import (
-        Flask, 
-        render_template, 
-        request, 
-        redirect, 
-        url_for, 
-        flash, 
-        session, 
-        send_file, 
-        current_app
-    )
-    print("Flask instalado correctamente.")
-except ImportError as e:
-    print("Flask no está instalado. Instalando Flask...")
-    os.system('pip install Flask')
-
+from flask import (
+    Flask,
+    render_template,
+    request,
+    redirect,
+    url_for,
+    flash,
+    session,
+    send_file
+)
 from werkzeug.utils import secure_filename
 from werkzeug.exceptions import RequestEntityTooLarge
-
-# GitHub integration
 import github
-from github import Github, InputGitTreeElement
-
-# Google Drive integration
+from github import Github
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
@@ -50,21 +37,18 @@ class PhotoUploadConfig:
     MAX_FILE_SIZE = 16 * 1024 * 1024  # 16MB
 
     # GitHub Repository Configuration
-    GITHUB_REPO_OWNER = os.environ.get('GITHUB_REPO_OWNER')
-    GITHUB_REPO_NAME = os.environ.get('GITHUB_REPO_NAME')
-    GITHUB_ACCESS_TOKEN = os.environ.get('GITHUB_ACCESS_TOKEN')
+    GITHUB_REPO_OWNER = os.getenv('GITHUB_REPO_OWNER')
+    GITHUB_REPO_NAME = os.getenv('GITHUB_REPO_NAME')
+    GITHUB_ACCESS_TOKEN = os.getenv('GITHUB_ACCESS_TOKEN')
 
     # Google Drive Configuration
-    GOOGLE_DRIVE_FOLDER_ID = os.environ.get('GOOGLE_DRIVE_FOLDER_ID')
+    GOOGLE_DRIVE_FOLDER_ID = os.getenv('GOOGLE_DRIVE_FOLDER_ID')
 
 def create_app() -> Flask:
     """Create and configure the Flask application."""
     app = Flask(__name__)
-    
-    # Configuration
     app.config['SECRET_KEY'] = os.urandom(24)
     app.config['MAX_CONTENT_LENGTH'] = PhotoUploadConfig.MAX_FILE_SIZE
-
     return app
 
 app = create_app()
@@ -72,16 +56,12 @@ app = create_app()
 def read_shared_photos() -> List[dict]:
     """Read shared photos metadata from GitHub repository."""
     try:
-        # Initialize GitHub client
         g = Github(PhotoUploadConfig.GITHUB_ACCESS_TOKEN)
         repo = g.get_repo(f"{PhotoUploadConfig.GITHUB_REPO_OWNER}/{PhotoUploadConfig.GITHUB_REPO_NAME}")
-        
-        # Try to get the shared photos file
         try:
             file_contents = repo.get_contents(PhotoUploadConfig.SHARED_PHOTOS_FILE)
             return json.loads(file_contents.decoded_content)
         except github.UnknownObjectException:
-            # File doesn't exist, return empty list
             return []
     except Exception as e:
         logger.error(f"Error reading shared photos: {str(e)}")
@@ -90,27 +70,21 @@ def read_shared_photos() -> List[dict]:
 def write_shared_photos(photos: List[dict]):
     """Write shared photos metadata to GitHub repository."""
     try:
-        # Initialize GitHub client
         g = Github(PhotoUploadConfig.GITHUB_ACCESS_TOKEN)
         repo = g.get_repo(f"{PhotoUploadConfig.GITHUB_REPO_OWNER}/{PhotoUploadConfig.GITHUB_REPO_NAME}")
-        
-        # Prepare file contents
         file_contents = json.dumps(photos, indent=2)
-        
-        # Try to update existing file or create new
         try:
             existing_file = repo.get_contents(PhotoUploadConfig.SHARED_PHOTOS_FILE)
             repo.update_file(
-                path=PhotoUploadConfig.SHARED_PHOTOS_FILE, 
-                message="Update shared photos metadata", 
-                content=file_contents, 
+                path=PhotoUploadConfig.SHARED_PHOTOS_FILE,
+                message="Update shared photos metadata",
+                content=file_contents,
                 sha=existing_file.sha
             )
         except github.UnknownObjectException:
-            # File doesn't exist, create it
             repo.create_file(
-                path=PhotoUploadConfig.SHARED_PHOTOS_FILE, 
-                message="Create shared photos metadata", 
+                path=PhotoUploadConfig.SHARED_PHOTOS_FILE,
+                message="Create shared photos metadata",
                 content=file_contents
             )
     except Exception as e:
@@ -119,32 +93,21 @@ def write_shared_photos(photos: List[dict]):
 def upload_to_google_drive(file, filename):
     """Upload file to Google Drive."""
     try:
-        # Create credentials from session or environment
         creds = Credentials.from_authorized_user_file('token.json', ['https://www.googleapis.com/auth/drive.file'])
-        
-        # Build Drive service
         service = build('drive', 'v3', credentials=creds)
-        
-        # Prepare file metadata
+
         file_metadata = {
             'name': filename,
             'parents': [PhotoUploadConfig.GOOGLE_DRIVE_FOLDER_ID]
         }
-        
-        # Prepare media
-        media = MediaIoBaseUpload(
-            io.BytesIO(file.read()),
-            mimetype=file.content_type,
-            resumable=True
-        )
-        
-        # Upload file
+        media = MediaIoBaseUpload(io.BytesIO(file.read()), mimetype=file.content_type, resumable=True)
+
         uploaded_file = service.files().create(
-            body=file_metadata, 
-            media_body=media, 
+            body=file_metadata,
+            media_body=media,
             fields='id'
         ).execute()
-        
+
         return uploaded_file.get('id')
     except Exception as e:
         logger.error(f"Google Drive upload error: {str(e)}")
@@ -152,10 +115,7 @@ def upload_to_google_drive(file, filename):
 
 def allowed_file(filename: str) -> bool:
     """Check if the file has an allowed extension."""
-    return (
-        '.' in filename and 
-        filename.rsplit('.', 1)[1].lower() in PhotoUploadConfig.ALLOWED_EXTENSIONS
-    )
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in PhotoUploadConfig.ALLOWED_EXTENSIONS
 
 def generate_unique_filename(filename: str) -> str:
     """Generate a unique filename while preserving the original file extension."""
@@ -171,13 +131,10 @@ def index():
     shared_photos = read_shared_photos()
     filtered_photos = [photo for photo in shared_photos if photo['uploader'] == session.get('username', 'Invitado')]
     
-    photos_remaining = max(
-        PhotoUploadConfig.MAX_PHOTOS_PER_USER - len(session['photos']), 
-        0
-    )
+    photos_remaining = max(PhotoUploadConfig.MAX_PHOTOS_PER_USER - len(session['photos']), 0)
     
     return render_template(
-        'index.html', 
+        'index.html',
         photos=session['photos'],
         shared_photos=filtered_photos,
         photos_remaining=photos_remaining
@@ -189,9 +146,7 @@ def upload_file():
     if 'photos' not in session:
         session['photos'] = []
     
-    current_photo_count = len(session['photos'])
-    
-    if current_photo_count >= PhotoUploadConfig.MAX_PHOTOS_PER_USER:
+    if len(session['photos']) >= PhotoUploadConfig.MAX_PHOTOS_PER_USER:
         flash(f'Máximo límite de {PhotoUploadConfig.MAX_PHOTOS_PER_USER} fotos alcanzado', 'error')
         return redirect(url_for('index'))
     
@@ -209,13 +164,9 @@ def upload_file():
         try:
             secure_fn = secure_filename(file.filename)
             unique_filename = generate_unique_filename(secure_fn)
-            
-            # Upload to Google Drive
             drive_file_id = upload_to_google_drive(file, unique_filename)
-            
-            # Add to session and shared photos
+
             session['photos'].append(unique_filename)
-            
             shared_photos = read_shared_photos()
             shared_photos.append({
                 'filename': unique_filename,
@@ -224,7 +175,7 @@ def upload_file():
                 'timestamp': str(uuid.uuid4())
             })
             write_shared_photos(shared_photos)
-            
+
             logger.info(f"File uploaded successfully: {unique_filename}")
             flash('¡Archivo subido exitosamente!', 'success')
             return redirect(url_for('index'))
@@ -235,7 +186,7 @@ def upload_file():
             return redirect(url_for('index'))
     
     else:
-        flash('Tipo de archivo inválido. Los tipos permitidos son: png, jpg, jpeg, gif, webp', 'error')
+        flash('Tipo de archivo inválido.', 'error')
         return redirect(url_for('index'))
 
 @app.route('/delete/<filename>', methods=['POST'])
@@ -244,28 +195,22 @@ def delete_photo(filename: str):
     shared_photos = read_shared_photos()
     current_username = session.get('username', 'Invitado')
 
-    # Find the photo to delete
     photo_to_delete = next(
-        (photo for photo in shared_photos 
-         if photo['filename'] == filename and photo['uploader'] == current_username), 
+        (photo for photo in shared_photos if photo['filename'] == filename and photo['uploader'] == current_username), 
         None
     )
 
     if photo_to_delete:
-        # Delete from Google Drive
         try:
             creds = Credentials.from_authorized_user_file('token.json', ['https://www.googleapis.com/auth/drive.file'])
             service = build('drive', 'v3', credentials=creds)
             service.files().delete(fileId=photo_to_delete['drive_file_id']).execute()
         except Exception as e:
             logger.error(f"Error deleting from Google Drive: {str(e)}")
-        
-        # Remove from shared photos
-        updated_photos = [
-            photo for photo in shared_photos
-            if photo['filename'] != filename or photo['uploader'] != current_username
-        ]
 
+        updated_photos = [photo for photo in shared_photos
+                          if photo['filename'] != filename or photo['uploader'] != current_username]
+        
         write_shared_photos(updated_photos)
         logger.info(f"Foto eliminada: {filename} por {current_username}")
         flash('¡Foto eliminada exitosamente!', 'success')
@@ -278,7 +223,6 @@ def delete_photo(filename: str):
 def view_photo(filename: str):
     """View a photo from Google Drive."""
     try:
-        # Find the file ID in shared photos
         shared_photos = read_shared_photos()
         photo = next((p for p in shared_photos if p['filename'] == filename), None)
         
@@ -286,23 +230,14 @@ def view_photo(filename: str):
             flash('Foto no encontrada', 'error')
             return redirect(url_for('index'))
         
-        # Download from Google Drive
         creds = Credentials.from_authorized_user_file('token.json', ['https://www.googleapis.com/auth/drive.file'])
         service = build('drive', 'v3', credentials=creds)
         
-        # Get file metadata and content
-        file_metadata = service.files().get(fileId=photo['drive_file_id']).execute()
         file_content = service.files().get_media(fileId=photo['drive_file_id']).execute()
-        
-        # Create an in-memory file-like object
         file_obj = io.BytesIO(file_content)
         file_obj.seek(0)
         
-        return send_file(
-            file_obj, 
-            mimetype=file_metadata.get('mimeType', 'image/jpeg'),
-            download_name=filename
-        )
+        return send_file(file_obj, download_name=filename)
     except Exception as e:
         logger.error(f"Error viewing photo: {str(e)}")
         flash('Error al ver la foto', 'error')
@@ -311,7 +246,7 @@ def view_photo(filename: str):
 @app.errorhandler(RequestEntityTooLarge)
 def handle_large_file(error):
     """Handle file size exceeding limit.""" 
-    flash(f'Tamaño de archivo excedido. Máximo {PhotoUploadConfig.MAX_FILE_SIZE//(1024*1024)} MB', 'error')
+    flash(f'Tamaño de archivo excedido. Máximo {PhotoUploadConfig.MAX_FILE_SIZE // (1024*1024)} MB', 'error')
     return redirect(url_for('index'))
 
 if __name__ == '__main__':
